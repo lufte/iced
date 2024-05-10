@@ -274,6 +274,7 @@ where
             state,
             self.id.as_ref().map(|id| &id.0),
             bounds,
+            content_bounds,
             translation,
         );
 
@@ -464,6 +465,15 @@ pub fn scroll_to<Message: 'static>(
     offset: AbsoluteOffset,
 ) -> Command<Message> {
     Command::widget(operation::scrollable::scroll_to(id.0, offset))
+}
+
+/// Produces a [`Command`] that scrolls the [`Scrollable`] with the given [`Id`]
+/// by the provided [`AbsoluteOffset`] along the x & y axis.
+pub fn scroll_by<Message: 'static>(
+    id: Id,
+    offset: AbsoluteOffset,
+) -> Command<Message> {
+    Command::widget(operation::scrollable::scroll_by(id.0, offset))
 }
 
 /// Computes the layout of a [`Scrollable`].
@@ -1109,6 +1119,10 @@ impl operation::Scrollable for State {
     fn scroll_to(&mut self, offset: AbsoluteOffset) {
         State::scroll_to(self, offset);
     }
+
+    fn scroll_by(&mut self, offset: AbsoluteOffset, bounds: Rectangle, content_bounds: Rectangle) {
+        State::scroll_by(self, offset, bounds, content_bounds);
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1291,6 +1305,27 @@ impl State {
     pub fn scroll_to(&mut self, offset: AbsoluteOffset) {
         self.offset_x = Offset::Absolute(offset.x.max(0.0));
         self.offset_y = Offset::Absolute(offset.y.max(0.0));
+    }
+
+    /// Scroll by the provided [`AbsoluteOffset`].
+    pub fn scroll_by(
+        &mut self,
+        offset: AbsoluteOffset,
+        bounds: Rectangle,
+        content_bounds: Rectangle,
+    ) {
+        self.offset_x = match self.offset_x {
+            Offset::Absolute(v) => Offset::Absolute((v + offset.x).max(0.0)),
+            rel => Offset::Absolute(
+                (rel.absolute(bounds.width, content_bounds.width) + offset.x).max(0.0)
+            ),
+        };
+        self.offset_y = match self.offset_y {
+            Offset::Absolute(v) => Offset::Absolute((v + offset.y).max(0.0)),
+            rel => Offset::Absolute(
+                (rel.absolute(bounds.height, content_bounds.height) + offset.y).max(0.0)
+            ),
+        };
     }
 
     /// Unsnaps the current scroll position, if snapped, given the bounds of the
