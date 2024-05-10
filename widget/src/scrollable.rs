@@ -1315,13 +1315,17 @@ impl State {
         content_bounds: Rectangle,
     ) {
         self.offset_x = match self.offset_x {
-            Offset::Absolute(v) => Offset::Absolute((v + offset.x).max(0.0)),
+            Offset::Absolute(v) => Offset::Absolute((v + offset.x).max(0.0).min(
+                content_bounds.width - bounds.width
+            )),
             rel => Offset::Absolute(
                 (rel.absolute(bounds.width, content_bounds.width) + offset.x).max(0.0)
             ),
         };
         self.offset_y = match self.offset_y {
-            Offset::Absolute(v) => Offset::Absolute((v + offset.y).max(0.0)),
+            Offset::Absolute(v) => Offset::Absolute((v + offset.y).max(0.0).min(
+                content_bounds.height - bounds.height
+            )),
             rel => Offset::Absolute(
                 (rel.absolute(bounds.height, content_bounds.height) + offset.y).max(0.0)
             ),
