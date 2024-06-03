@@ -27,6 +27,7 @@ pub mod combo_box;
 pub mod container;
 pub mod keyed;
 pub mod overlay;
+pub mod non_wrapping_text;
 pub mod pane_grid;
 pub mod pick_list;
 pub mod progress_bar;
