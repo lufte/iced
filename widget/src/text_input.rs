@@ -1,4 +1,5 @@
 //! Display fields that can be filled with text.
+//! Customized to implement on_focus and on_unfocus event handlers.
 //!
 //! A [`TextInput`] has some local [`State`].
 mod editor;
@@ -39,7 +40,7 @@ pub use iced_style::text_input::{Appearance, StyleSheet};
 /// # Example
 /// ```no_run
 /// # pub type TextInput<'a, Message> =
-/// #     iced_widget::TextInput<'a, Message, iced_widget::style::Theme, iced_widget::renderer::Renderer>;
+/// #     crate::TextInput<'a, Message, crate::style::Theme, crate::renderer::Renderer>;
 /// #
 /// #[derive(Debug, Clone)]
 /// enum Message {
@@ -78,6 +79,8 @@ pub struct TextInput<
     on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_paste: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_submit: Option<Message>,
+    on_focus: Option<Message>,
+    on_unfocus: Option<Message>,
     icon: Option<Icon<Renderer::Font>>,
     style: Theme::Style,
 }
@@ -110,6 +113,8 @@ where
             on_input: None,
             on_paste: None,
             on_submit: None,
+            on_focus: None,
+            on_unfocus: None,
             icon: None,
             style: Default::default(),
         }
@@ -153,6 +158,20 @@ where
         on_paste: impl Fn(String) -> Message + 'a,
     ) -> Self {
         self.on_paste = Some(Box::new(on_paste));
+        self
+    }
+
+    /// Sets the message that should be produced when the [`TextInput`] is
+    /// focused.
+    pub fn on_focus(mut self, message: Message) -> Self {
+        self.on_focus = Some(message);
+        self
+    }
+
+    /// Sets the message that should be produced when the [`TextInput`] is
+    /// unfocused.
+    pub fn on_unfocus(mut self, message: Message) -> Self {
+        self.on_unfocus = Some(message);
         self
     }
 
@@ -354,6 +373,8 @@ where
             self.on_input.as_deref(),
             self.on_paste.as_deref(),
             &self.on_submit,
+            &self.on_focus,
+            &self.on_unfocus,
             || tree.state.downcast_mut::<State<Renderer::Paragraph>>(),
         )
     }
@@ -606,6 +627,8 @@ pub fn update<'a, Message, Renderer>(
     on_input: Option<&dyn Fn(String) -> Message>,
     on_paste: Option<&dyn Fn(String) -> Message>,
     on_submit: &Option<Message>,
+    on_focus: &Option<Message>,
+    on_unfocus: &Option<Message>,
     state: impl FnOnce() -> &'a mut State<Renderer::Paragraph>,
 ) -> event::Status
 where
@@ -635,7 +658,7 @@ where
                 None
             };
 
-            state.is_focused = if click_position.is_some() {
+            let new_focus = if click_position.is_some() {
                 state.is_focused.or_else(|| {
                     let now = Instant::now();
 
@@ -648,6 +671,17 @@ where
             } else {
                 None
             };
+            if new_focus.is_none() && !state.is_focused.is_none() {
+                state.is_focused = new_focus;
+                if let Some(on_unfocus) = on_unfocus.clone() {
+                    shell.publish(on_unfocus);
+                }
+            } else if !new_focus.is_none() && state.is_focused.is_none() {
+                state.is_focused = new_focus;
+                if let Some(on_focus) = on_focus.clone() {
+                    shell.publish(on_focus);
+                }
+            }
 
             if let Some(cursor_position) = click_position {
                 let text_layout = layout.children().next().unwrap();
@@ -761,27 +795,6 @@ where
 
                 let modifiers = state.keyboard_modifiers;
                 focus.updated_at = Instant::now();
-
-                if let Some(text) = text {
-                    state.is_pasting = None;
-
-                    let c = text.chars().next().unwrap_or_default();
-
-                    if !c.is_control() {
-                        let mut editor = Editor::new(value, &mut state.cursor);
-
-                        editor.insert(c);
-
-                        let message = (on_input)(editor.contents());
-                        shell.publish(message);
-
-                        focus.updated_at = Instant::now();
-
-                        update_cache(state, value);
-
-                        return event::Status::Captured;
-                    }
-                }
 
                 match key.as_ref() {
                     keyboard::Key::Named(key::Named::Enter) => {
@@ -965,7 +978,29 @@ where
                     ) => {
                         return event::Status::Ignored;
                     }
-                    _ => {}
+                    _ => {
+                        if let Some(text) = text {
+                            state.is_pasting = None;
+
+                            let c = text.chars().next().unwrap_or_default();
+
+                            if !c.is_control() {
+                                let mut editor =
+                                    Editor::new(value, &mut state.cursor);
+
+                                editor.insert(c);
+
+                                let message = (on_input)(editor.contents());
+                                shell.publish(message);
+
+                                focus.updated_at = Instant::now();
+
+                                update_cache(state, value);
+
+                                return event::Status::Captured;
+                            }
+                        }
+                    }
                 }
 
                 return event::Status::Captured;
