@@ -10,9 +10,12 @@ use crate::core::text::editor::{Cursor, Editor as _};
 use crate::core::text::highlighter::{self, Highlighter};
 use crate::core::text::{self, LineHeight};
 use crate::core::widget::{self, Widget};
+use crate::core::widget::operation::{self, Operation};
+use crate::core::widget::tree::{Tree};
 use crate::core::{
     Element, Length, Padding, Pixels, Rectangle, Shell, Size, Vector,
 };
+use crate::runtime::Command;
 
 use std::cell::RefCell;
 use std::fmt;
@@ -35,6 +38,7 @@ pub struct TextEditor<
     Theme: StyleSheet,
     Renderer: text::Renderer,
 {
+    id: Option<Id>,
     content: &'a Content<Renderer>,
     font: Option<Renderer::Font>,
     text_size: Option<Pixels>,
@@ -44,6 +48,7 @@ pub struct TextEditor<
     padding: Padding,
     style: Theme::Style,
     on_edit: Option<Box<dyn Fn(Action) -> Message + 'a>>,
+    on_unfocus: Option<Message>,
     highlighter_settings: Highlighter::Settings,
     highlighter_format: fn(
         &Highlighter::Highlight,
@@ -60,6 +65,7 @@ where
     /// Creates new [`TextEditor`] with the given [`Content`].
     pub fn new(content: &'a Content<Renderer>) -> Self {
         Self {
+            id: None,
             content,
             font: None,
             text_size: None,
@@ -69,6 +75,7 @@ where
             padding: Padding::new(5.0),
             style: Default::default(),
             on_edit: None,
+            on_unfocus: None,
             highlighter_settings: (),
             highlighter_format: |_highlight, _theme| {
                 highlighter::Format::default()
@@ -84,6 +91,12 @@ where
     Theme: StyleSheet,
     Renderer: text::Renderer,
 {
+    /// Sets the [`Id`] of the [`TextEditor`].
+    pub fn id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
+    }
+
     /// Sets the height of the [`TextEditor`].
     pub fn height(mut self, height: impl Into<Length>) -> Self {
         self.height = height.into();
@@ -99,6 +112,13 @@ where
         on_edit: impl Fn(Action) -> Message + 'a,
     ) -> Self {
         self.on_edit = Some(Box::new(on_edit));
+        self
+    }
+
+    /// Sets the message that should be produced when the [`TextEditor`] is
+    /// unfocused.
+    pub fn on_unfocus(mut self, message: Message) -> Self {
+        self.on_unfocus = Some(message);
         self
     }
 
@@ -127,6 +147,7 @@ where
         ) -> highlighter::Format<Renderer::Font>,
     ) -> TextEditor<'a, H, Message, Theme, Renderer> {
         TextEditor {
+            id: self.id,
             content: self.content,
             font: self.font,
             text_size: self.text_size,
@@ -136,6 +157,7 @@ where
             padding: self.padding,
             style: self.style,
             on_edit: self.on_edit,
+            on_unfocus: self.on_unfocus,
             highlighter_settings: settings,
             highlighter_format: to_format,
         }
@@ -302,9 +324,25 @@ struct State<Highlighter: text::Highlighter> {
     highlighter_format_address: usize,
 }
 
+impl<P: text::Highlighter> operation::Focusable for State<P> {
+    fn is_focused(&self) -> bool {
+        self.is_focused
+    }
+
+    fn focus(&mut self) {
+        self.is_focused = true;
+    }
+
+    fn unfocus(&mut self) {
+        self.is_focused = false;
+        self.drag_click = None;
+    }
+}
+
 impl<'a, Highlighter, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for TextEditor<'a, Highlighter, Message, Theme, Renderer>
 where
+    Message: Clone,
     Highlighter: text::Highlighter,
     Theme: StyleSheet,
     Renderer: text::Renderer,
@@ -386,6 +424,18 @@ where
         }
     }
 
+    fn operate(
+        &self,
+        tree: &mut Tree,
+        _layout: Layout<'_>,
+        _renderer: &Renderer,
+        operation: &mut dyn Operation<Message>,
+    ) {
+        let state = tree.state.downcast_mut::<State<Highlighter>>();
+
+        operation.focusable(state, self.id.as_ref().map(|id| &id.0));
+    }
+
     fn on_event(
         &mut self,
         tree: &mut widget::Tree,
@@ -440,6 +490,9 @@ where
             Update::Unfocus => {
                 state.is_focused = false;
                 state.drag_click = None;
+                if let Some(message) = &self.on_unfocus {
+                    shell.publish((*message).clone());
+                }
             }
             Update::Release => {
                 state.drag_click = None;
@@ -599,7 +652,7 @@ impl<'a, Highlighter, Message, Theme, Renderer>
     for Element<'a, Message, Theme, Renderer>
 where
     Highlighter: text::Highlighter,
-    Message: 'a,
+    Message: 'a + Clone,
     Theme: StyleSheet + 'a,
     Renderer: text::Renderer,
 {
@@ -773,4 +826,33 @@ mod platform {
             modifiers.control()
         }
     }
+}
+
+/// The identifier of a [`TextEditor`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Id(widget::Id);
+
+impl Id {
+    /// Creates a custom [`Id`].
+    pub fn new(id: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        Self(widget::Id::new(id))
+    }
+
+    /// Creates a unique [`Id`].
+    ///
+    /// This function produces a different [`Id`] every time it is called.
+    pub fn unique() -> Self {
+        Self(widget::Id::unique())
+    }
+}
+
+impl From<Id> for widget::Id {
+    fn from(id: Id) -> Self {
+        id.0
+    }
+}
+
+/// Produces a [`Command`] that focuses the [`TextEditor`] with the given [`Id`].
+pub fn focus<Message: 'static>(id: Id) -> Command<Message> {
+    Command::widget(operation::focusable::focus(id.0))
 }
