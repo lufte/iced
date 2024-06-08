@@ -765,7 +765,7 @@ impl Update {
                     }
 
                     match key.as_ref() {
-                        keyboard::Key::Named(key::Named::Enter) => {
+                        keyboard::Key::Named(key::Named::Enter) if modifiers.is_empty() => {
                             edit(Edit::Enter)
                         }
                         keyboard::Key::Named(key::Named::Backspace) => {
