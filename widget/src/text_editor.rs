@@ -259,7 +259,7 @@ where
     ///
     /// Lines are joined with `'\n'`.
     pub fn text(&self) -> String {
-        let mut text = self.lines().enumerate().fold(
+        let text = self.lines().enumerate().fold(
             String::new(),
             |mut contents, (i, line)| {
                 if i > 0 {
@@ -271,10 +271,6 @@ where
                 contents
             },
         );
-
-        if !text.ends_with('\n') {
-            text.push('\n');
-        }
 
         text
     }
