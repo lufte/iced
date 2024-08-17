@@ -29,6 +29,7 @@ pub mod rule;
 pub mod scrollable;
 pub mod slider;
 pub mod text;
+pub mod non_wrapping_text;
 pub mod text_editor;
 pub mod text_input;
 pub mod toggler;
