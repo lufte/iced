@@ -50,6 +50,7 @@ use crate::core::{
     Background, Border, Color, Element, Length, Padding, Pixels, Point,
     Rectangle, Shell, Size, SmolStr, Theme, Vector,
 };
+use crate::runtime::task::{self, Task};
 
 use std::cell::RefCell;
 use std::fmt;
@@ -103,6 +104,7 @@ pub struct TextEditor<
     Theme: Catalog,
     Renderer: text::Renderer,
 {
+    id: Option<Id>,
     content: &'a Content<Renderer>,
     placeholder: Option<text::Fragment<'a>>,
     font: Option<Renderer::Font>,
@@ -115,6 +117,7 @@ pub struct TextEditor<
     class: Theme::Class<'a>,
     key_binding: Option<Box<dyn Fn(KeyPress) -> Option<Binding<Message>> + 'a>>,
     on_edit: Option<Box<dyn Fn(Action) -> Message + 'a>>,
+    on_unfocus: Option<Message>,
     highlighter_settings: Highlighter::Settings,
     highlighter_format: fn(
         &Highlighter::Highlight,
@@ -131,6 +134,7 @@ where
     /// Creates new [`TextEditor`] with the given [`Content`].
     pub fn new(content: &'a Content<Renderer>) -> Self {
         Self {
+            id: None,
             content,
             placeholder: None,
             font: None,
@@ -143,6 +147,7 @@ where
             class: Theme::default(),
             key_binding: None,
             on_edit: None,
+            on_unfocus: None,
             highlighter_settings: (),
             highlighter_format: |_highlight, _theme| {
                 highlighter::Format::default()
@@ -167,6 +172,12 @@ where
         self
     }
 
+    /// Sets the [`Id`] of the [`TextEditor`].
+    pub fn id(mut self, id: Id) -> Self {
+        self.id = Some(id);
+        self
+    }
+
     /// Sets the height of the [`TextEditor`].
     pub fn height(mut self, height: impl Into<Length>) -> Self {
         self.height = height.into();
@@ -188,6 +199,13 @@ where
         on_edit: impl Fn(Action) -> Message + 'a,
     ) -> Self {
         self.on_edit = Some(Box::new(on_edit));
+        self
+    }
+
+    /// Sets the message that should be produced when the [`TextEditor`] is
+    /// unfocused.
+    pub fn on_unfocus(mut self, message: Message) -> Self {
+        self.on_unfocus = Some(message);
         self
     }
 
@@ -256,6 +274,7 @@ where
         ) -> highlighter::Format<Renderer::Font>,
     ) -> TextEditor<'a, H, Message, Theme, Renderer> {
         TextEditor {
+            id: self.id,
             content: self.content,
             placeholder: self.placeholder,
             font: self.font,
@@ -268,6 +287,7 @@ where
             class: self.class,
             key_binding: self.key_binding,
             on_edit: self.on_edit,
+            on_unfocus: self.on_unfocus,
             highlighter_settings: settings,
             highlighter_format: to_format,
         }
@@ -392,7 +412,7 @@ where
     ///
     /// Lines are joined with `'\n'`.
     pub fn text(&self) -> String {
-        let mut text = self.lines().enumerate().fold(
+        let text = self.lines().enumerate().fold(
             String::new(),
             |mut contents, (i, line)| {
                 if i > 0 {
@@ -404,10 +424,6 @@ where
                 contents
             },
         );
-
-        if !text.ends_with('\n') {
-            text.push('\n');
-        }
 
         text
     }
@@ -514,6 +530,7 @@ impl<Highlighter: text::Highlighter> operation::Focusable
 impl<'a, Highlighter, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for TextEditor<'a, Highlighter, Message, Theme, Renderer>
 where
+    Message: Clone,
     Highlighter: text::Highlighter,
     Theme: Catalog,
     Renderer: text::Renderer,
@@ -699,12 +716,13 @@ where
                 fn apply_binding<
                     H: text::Highlighter,
                     R: text::Renderer,
-                    Message,
+                    Message: Clone,
                 >(
                     binding: Binding<Message>,
                     content: &Content<R>,
                     state: &mut State<H>,
                     on_edit: &dyn Fn(Action) -> Message,
+                    on_unfocus: &Option<Message>,
                     clipboard: &mut dyn Clipboard,
                     shell: &mut Shell<'_, Message>,
                 ) {
@@ -714,6 +732,9 @@ where
                         Binding::Unfocus => {
                             state.focus = None;
                             state.drag_click = None;
+                            if let Some(message) = on_unfocus {
+                                shell.publish((*message).clone());
+                            }
                         }
                         Binding::Copy => {
                             if let Some(selection) = content.selection() {
@@ -773,7 +794,7 @@ where
                             for binding in sequence {
                                 apply_binding(
                                     binding, content, state, on_edit,
-                                    clipboard, shell,
+                                    on_unfocus, clipboard, shell,
                                 );
                             }
                         }
@@ -788,6 +809,7 @@ where
                     self.content,
                     state,
                     on_edit,
+                    &self.on_unfocus,
                     clipboard,
                     shell,
                 );
@@ -958,7 +980,7 @@ where
     ) {
         let state = tree.state.downcast_mut::<State<Highlighter>>();
 
-        operation.focusable(state, None);
+        operation.focusable(state, self.id.as_ref().map(|id| &id.0));
     }
 }
 
@@ -967,7 +989,7 @@ impl<'a, Highlighter, Message, Theme, Renderer>
     for Element<'a, Message, Theme, Renderer>
 where
     Highlighter: text::Highlighter,
-    Message: 'a,
+    Message: 'a + Clone,
     Theme: Catalog + 'a,
     Renderer: text::Renderer,
 {
@@ -1041,7 +1063,7 @@ impl<Message> Binding<Message> {
         }
 
         match key.as_ref() {
-            keyboard::Key::Named(key::Named::Enter) => Some(Self::Enter),
+            keyboard::Key::Named(key::Named::Enter) if modifiers.is_empty() => Some(Self::Enter),
             keyboard::Key::Named(key::Named::Backspace) => {
                 Some(Self::Backspace)
             }
@@ -1308,4 +1330,33 @@ pub fn default(theme: &Theme, status: Status) -> Style {
             ..active
         },
     }
+}
+
+/// The identifier of a [`TextEditor`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Id(widget::Id);
+
+impl Id {
+    /// Creates a custom [`Id`].
+    pub fn new(id: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        Self(widget::Id::new(id))
+    }
+
+    /// Creates a unique [`Id`].
+    ///
+    /// This function produces a different [`Id`] every time it is called.
+    pub fn unique() -> Self {
+        Self(widget::Id::unique())
+    }
+}
+
+impl From<Id> for widget::Id {
+    fn from(id: Id) -> Self {
+        id.0
+    }
+}
+
+/// Produces a [`Task`] that focuses the [`TextEditor`] with the given [`Id`].
+pub fn focus<T>(id: Id) -> Task<T> {
+    task::effect(crate::runtime::Action::widget(operation::focusable::focus(id.0)))
 }
