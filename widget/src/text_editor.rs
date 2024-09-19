@@ -764,7 +764,7 @@ where
         tree: &widget::Tree,
         renderer: &mut Renderer,
         theme: &Theme,
-        defaults: &renderer::Style,
+        _defaults: &renderer::Style,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
@@ -833,7 +833,7 @@ where
             renderer.fill_editor(
                 &internal.editor,
                 text_bounds.position(),
-                defaults.text_color,
+                style.value,
                 text_bounds,
             );
         }
