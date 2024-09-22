@@ -1108,18 +1108,11 @@ where
                                 state.cursor.move_right(&self.value);
                             }
                         }
-                        keyboard::Key::Named(key::Named::Escape) => {
-                            state.is_focused = None;
-                            state.is_dragging = false;
-                            state.is_pasting = None;
-
-                            state.keyboard_modifiers =
-                                keyboard::Modifiers::default();
-                        }
                         keyboard::Key::Named(
                             key::Named::Tab
                             | key::Named::ArrowUp
-                            | key::Named::ArrowDown,
+                            | key::Named::ArrowDown
+                            | key::Named::Escape
                         ) => {
                             return event::Status::Ignored;
                         }
