@@ -122,6 +122,7 @@ pub struct TextEditor<
     class: Theme::Class<'a>,
     key_binding: Option<Box<dyn Fn(KeyPress) -> Option<Binding<Message>> + 'a>>,
     on_edit: Option<Box<dyn Fn(Action) -> Message + 'a>>,
+    on_unfocus: Option<Message>,
     highlighter_settings: Highlighter::Settings,
     highlighter_format: fn(
         &Highlighter::Highlight,
@@ -154,6 +155,7 @@ where
             class: <Theme as Catalog>::default(),
             key_binding: None,
             on_edit: None,
+            on_unfocus: None,
             highlighter_settings: (),
             highlighter_format: |_highlight, _theme| {
                 highlighter::Format::default()
@@ -188,6 +190,13 @@ where
     /// Sets the width of the [`TextEditor`].
     pub fn width(mut self, width: impl Into<Pixels>) -> Self {
         self.width = Length::from(width.into());
+        self
+    }
+
+    /// Sets the message that should be produced when the [`TextEditor`] is
+    /// unfocused.
+    pub fn on_unfocus(mut self, message: Message) -> Self {
+        self.on_unfocus = Some(message);
         self
     }
 
@@ -301,6 +310,7 @@ where
             class: self.class,
             key_binding: self.key_binding,
             on_edit: self.on_edit,
+            on_unfocus: self.on_unfocus,
             highlighter_settings: settings,
             highlighter_format: to_format,
             last_status: self.last_status,
@@ -587,6 +597,7 @@ impl<Highlighter: text::Highlighter> operation::Focusable
 impl<Highlighter, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for TextEditor<'_, Highlighter, Message, Theme, Renderer>
 where
+    Message: Clone,
     Highlighter: text::Highlighter,
     Theme: Catalog,
     Renderer: text::Renderer,
@@ -802,12 +813,13 @@ where
                     fn apply_binding<
                         H: text::Highlighter,
                         R: text::Renderer,
-                        Message,
+                        Message: Clone,
                     >(
                         binding: Binding<Message>,
                         content: &Content<R>,
                         state: &mut State<H>,
                         on_edit: &dyn Fn(Action) -> Message,
+                        on_unfocus: &Option<Message>,
                         clipboard: &mut dyn Clipboard,
                         shell: &mut Shell<'_, Message>,
                     ) {
@@ -818,6 +830,9 @@ where
                             Binding::Unfocus => {
                                 state.focus = None;
                                 state.drag_click = None;
+                                if let Some(message) = on_unfocus {
+                                    shell.publish((*message).clone());
+                                }
                             }
                             Binding::Copy => {
                                 if let Some(selection) = content.selection() {
@@ -877,7 +892,7 @@ where
                                 for binding in sequence {
                                     apply_binding(
                                         binding, content, state, on_edit,
-                                        clipboard, shell,
+                                        on_unfocus, clipboard, shell,
                                     );
                                 }
                             }
@@ -896,6 +911,7 @@ where
                         self.content,
                         state,
                         on_edit,
+                        &self.on_unfocus,
                         clipboard,
                         shell,
                     );
@@ -1103,7 +1119,7 @@ impl<'a, Highlighter, Message, Theme, Renderer>
     for Element<'a, Message, Theme, Renderer>
 where
     Highlighter: text::Highlighter,
-    Message: 'a,
+    Message: 'a + Clone,
     Theme: Catalog + 'a,
     Renderer: text::Renderer,
 {
@@ -1207,7 +1223,7 @@ impl<Message> Binding<Message> {
             convert_macos_shortcut(&key, modifiers).unwrap_or(modified_key);
 
         match modified_key.as_ref() {
-            keyboard::Key::Named(key::Named::Enter) => Some(Self::Enter),
+            keyboard::Key::Named(key::Named::Enter) if modifiers.is_empty() => Some(Self::Enter),
             keyboard::Key::Named(key::Named::Backspace) => {
                 Some(Self::Backspace)
             }
