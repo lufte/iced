@@ -1,4 +1,5 @@
 //! Text inputs display fields that can be filled with text.
+//! Customized to implement on_focus and on_unfocus event handlers.
 //!
 //! # Example
 //! ```no_run
@@ -116,6 +117,8 @@ pub struct TextInput<
     on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_paste: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_submit: Option<Message>,
+    on_focus: Option<Message>,
+    on_unfocus: Option<Message>,
     icon: Option<Icon<Renderer::Font>>,
     class: Theme::Class<'a>,
     last_status: Option<Status>,
@@ -147,6 +150,8 @@ where
             on_input: None,
             on_paste: None,
             on_submit: None,
+            on_focus: None,
+            on_unfocus: None,
             icon: None,
             class: Theme::default(),
             last_status: None,
@@ -200,6 +205,18 @@ where
     /// focused and the enter key is pressed, if `Some`.
     pub fn on_submit_maybe(mut self, on_submit: Option<Message>) -> Self {
         self.on_submit = on_submit;
+        self
+    }
+
+    /// Sets the message that should be produced when the [`TextInput`] is focused
+    pub fn on_focus(mut self, message: Message) -> Self {
+        self.on_focus = Some(message);
+        self
+    }
+
+    /// Sets the message that should be produced when the [`TextInput`] is unfocused
+    pub fn on_unfocus(mut self, message: Message) -> Self {
+        self.on_unfocus = Some(message);
         self
     }
 
@@ -722,7 +739,7 @@ where
 
                 let click_position = cursor.position_over(layout.bounds());
 
-                state.is_focused = if click_position.is_some() {
+                let new_focus = if click_position.is_some() {
                     let now = Instant::now();
 
                     Some(Focus {
@@ -733,6 +750,18 @@ where
                 } else {
                     None
                 };
+
+                if new_focus.is_none() && !state.is_focused.is_none() {
+                    state.is_focused = new_focus;
+                    if let Some(on_unfocus) = self.on_unfocus.clone() {
+                        shell.publish(on_unfocus);
+                    }
+                } else if !new_focus.is_none() && state.is_focused.is_none() {
+                    state.is_focused = new_focus;
+                    if let Some(on_focus) = self.on_focus.clone() {
+                        shell.publish(on_focus);
+                    }
+                }
 
                 if let Some(cursor_position) = click_position {
                     let text_layout = layout.children().next().unwrap();
