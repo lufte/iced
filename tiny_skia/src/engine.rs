@@ -343,8 +343,8 @@ impl Engine {
                 transformation: local_transformation,
             } => {
                 let transformation = transformation * *local_transformation;
-                let Some(clip_bounds) =
-                    local_clip_bounds.intersection(&clip_bounds)
+                let Some(clip_bounds) = clip_bounds
+                    .intersection(&(*local_clip_bounds * transformation))
                 else {
                     return;
                 };
